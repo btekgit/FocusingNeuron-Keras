@@ -532,7 +532,8 @@ def create_simple_model(input_shape, num_classes=10, settings={}):
                                    train_weights=settings['focus_train_weights'],
                                    si_regularizer=settings['focus_sigma_reg'],
                                    train_mu = settings['focus_train_mu'],
-                                   normed=settings['focus_norm_type'])(node_)
+                                   normed=settings['focus_norm_type'],
+                                   gain=1.0)(node_)
         else:
             node_ = Dense(nh,name='dense-'+str(h),activation='linear',
                           kernel_initializer=heu())(node_)
@@ -858,7 +859,8 @@ def test_comp(settings,random_sid=9):
     print (decay_dict)
     print (clip_dict)
     
-    opt= SGDwithLR(lr_dict, mom_dict,decay_dict,clip_dict, decay_epochs)#, decay=None)
+    opt= SGDwithLR(lr_dict, mom_dict,decay_dict,clip_dict, 
+                   decay_epochs,clipvalue=0.01)#, decay=None)
 
     model.compile(loss=keras.losses.categorical_crossentropy,
                   optimizer=opt,
@@ -1015,11 +1017,11 @@ if __name__ == "__main__":
     from shutil import copyfile
     print("Delayed start ",delayed_start)
     time.sleep(delayed_start)
-    dset='mnist' 
-    #dset='cifar10'  # cifar is better with batch 256
+    #dset='mnist' 
+    #dset='cifar10'  # ~64,5 cifar is better with batch 256, init_sigma =0.01 
     #dset='fashion'
     #dset = 'mnist-clut'
-    #dset='lfw_faces'
+    dset='lfw_faces' # ~78,use batch_size = 32, augment=True, init_sigm=0.025, init_mu=spread
     sigma_reg_set = None
     nhidden = (784,784)
     #nhidden = (256,)
@@ -1029,13 +1031,16 @@ if __name__ == "__main__":
     mod={'dset':dset, 'neuron':'focused', 'nhidden':nhidden, 'cnn_model':False,
          'nfilters':(32,32), 'kn_size':(5,5),
          'focus_init_sigma':0.025, 'focus_init_mu':'spread','focus_train_mu':True, 
-         'focus_train_si':True,'focus_train_weights':True,'focus_norm_type':0,
-         'focus_sigma_reg':sigma_reg_set,'augment':False, 
-         'Epochs':200, 'batch_size':512,'repeats':5,
+         'focus_train_si':True,'focus_train_weights':True,'focus_norm_type':2,
+         'focus_sigma_reg':sigma_reg_set,'augment':True, 
+         'Epochs':200, 'batch_size':32,'repeats':1,
          'lr_all':0.1}
     
     # lr_all 0.1 for MNIST
-    # lr_all:0.01 for CIFAR-FACES-CLUT
+    # lr_all:0.01 for CIFAR-FACES-CLUT 
+    # FACES OVERWRITES THIS IN THE CODE. 
+    # ALSO I USE GRAD CLIP 0.01. IT IS OK IF YOU DO GRAD_CLIP 1.0
+    
 
     
     f = test_comp
