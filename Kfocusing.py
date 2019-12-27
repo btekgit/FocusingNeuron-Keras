@@ -125,7 +125,7 @@ class FocusedLayer1D(Layer):
         self.MIN_SI = np.float32(MIN_SI)#, dtype='float32')
         self.MAX_SI = np.float32(MAX_SI)#, dtype='float32')
         
-        w_init = initializers.get(self.kernel_initializer) if self.kernel_initializer else self.weight_initializer_fw_bg
+        w_init = initializers.get(self.kernel_initializer) if self.kernel_initializer else self.weight_initializer_delta_ortho
         
         self.W = self.add_weight(shape=(self.input_dim, self.units),
                                       initializer=w_init,
@@ -256,6 +256,7 @@ class FocusedLayer1D(Layer):
                 if initer == 'He':
                     std = self.gain * sqrt32(2.0) / sqrt32(fan_in)
                 else:
+                    #std = self.gain * sqrt32(1.0) / sqrt32(W.shape[1])
                     std = self.gain * sqrt32(2.0) / sqrt32(fan_in+fan_out)
                 
                 std = np.float32(std)
@@ -292,13 +293,13 @@ class FocusedLayer1D(Layer):
         
         
         fan_out = self.units
-        MIN_FOC = 0.5
-        MAX_FOC = np.max(kernel)
+        #MIN_FOC = 0.5
+        #MAX_FOC = np.max(kernel)
         N = W.shape[0]
         for c in range(W.shape[1]):
             for r in range(W.shape[0]):
                 fan_in = kernel[r,c]
-                fan_in = fan_in if fan_in>=MIN_FOC else (MAX_FOC-fan_in)
+                #fan_in = fan_in if fan_in>=MIN_FOC else (MAX_FOC-fan_in)
                 
                 #fan_in *= self.input_channels no need for this in repeated U. 
                 if initer == 'He':
@@ -323,6 +324,32 @@ class FocusedLayer1D(Layer):
                 W[r,c] = w_vec.astype('float32')
                 
         return W
+    
+    def weight_initializer_delta_ortho(self,shape, dtype='float32'):
+        # this does not work better
+        initer = 'He'
+        distribution = 'uniform'
+        
+        kernel = K.eval(self.calc_U())
+        
+        W = np.zeros(shape=shape, dtype=dtype)
+        # for Each Gaussian initialize a new set of weights
+        verbose=self.verbose
+        #if verbose:
+        print("Kernel max, mean, min: ", np.max(kernel), np.mean(kernel), np.min(kernel))
+        print("kernel shape:", kernel.shape, ", W shape: ",W.shape)
+        
+        mu, si = mu_si_initializer(self.init_mu, self.init_sigma, self.input_dim,
+                                   self.units)
+        mu =np.int32(mu*W.shape[0])
+        print(mu)
+        for n in range(W.shape[1]):
+            W[mu[n], n] = 1.0/sqrt32(W.shape[0])/kernel[mu[n],n]
+            
+        #print(W[:,0])
+        #print(W[:,1])
+        
+        return W.astype('float32')
     
     def calc_U(self,verbose=False):
         """
@@ -352,6 +379,9 @@ class FocusedLayer1D(Layer):
         elif self.normed==2:
             result /= K.sqrt(K.sum(K.square(result), axis=-1,keepdims=True))
             result *= K.sqrt(K.constant(self.input_dim))
+        
+        elif self.normed==3:
+            result += 0.1 # adding a bias
 
             if verbose:
                 kernel= K.eval(result)
@@ -508,8 +538,13 @@ def sqrt32(x):
     
 def create_simple_model(input_shape, num_classes=10, settings={}):
     from keras.models import  Model
-    from keras.layers import Input, Dense, Dropout, Flatten, BatchNormalization
+    from keras.layers import Input, Dense, Dropout, Flatten, BatchNormalization, AlphaDropout
     from keras.layers import Activation # MaxPool2D
+    act_func = 'relu'
+    act_func = 'selu'
+    act_func = 'relu'
+    #drp_out = AlphaDropout
+    drp_out = Dropout
     #from keras.regularizers import l2
     
     node_in = Input(shape=input_shape, name='inputlayer')
@@ -539,8 +574,8 @@ def create_simple_model(input_shape, num_classes=10, settings={}):
                           kernel_initializer=heu())(node_)
         
         node_ = BatchNormalization()(node_)
-        node_ = Activation('relu')(node_)
-        node_ = Dropout(0.25)(node_)
+        node_ = Activation(act_func)(node_)
+        node_ = drp_out(0.25)(node_)
         h = h + 1
     
     node_fin = Dense(num_classes, name='softmax', activation='softmax', 
@@ -674,8 +709,10 @@ def test_comp(settings,random_sid=9):
     #from skimage import filters
     from keras import backend as K
     #from keras_utils import WeightHistory as WeightHistory
-    from keras_utils import RecordVariable, \
-    PrintLayerVariableStats, SGDwithLR, eval_Kdict, standarize_image_025
+    from keras_utils import RecordVariable, RecordOutput, \
+    PrintLayerVariableStats, SGDwithLR, eval_Kdict, standarize_image_025,\
+    standarize_image_01, AdamwithClip
+    
     from keras_preprocessing.image import ImageDataGenerator
 
     K.clear_session()
@@ -697,8 +734,9 @@ def test_comp(settings,random_sid=9):
     MAX_MU = 1.0
     lr_dict = {'all':settings['lr_all']} #0.1 is default for MNIST
     mom_dict = {'all':0.9}    
-    decay_dict = {'all':0.9}
+    decay_dict = {'all':0.5} # works 99.29 with mnist
     clip_dict ={}
+    #UPDATE_Clip = 0.25
     for i,n in enumerate(settings['nhidden']):
             lr_dict.update({'focus-'+str(i+1)+'/Sigma:0':0.01}) # best results 0.01
             lr_dict.update({'focus-'+str(i+1)+'/Mu:0':0.01}) #best results 0.01
@@ -809,7 +847,7 @@ def test_comp(settings,random_sid=9):
         
         plt.imshow(X[0].reshape((img_rows,img_cols)))
         plt.show()
-        lr_dict = {'all':0.001}
+        lr_dict = {'all':0.5}
         
         e_i = x_train.shape[0] // batch_size
         decay_epochs =np.array([e_i*50,e_i*100, e_i*150], dtype='int64')
@@ -829,7 +867,8 @@ def test_comp(settings,random_sid=9):
         
         x_train = x_train.astype('float32')
         x_test = x_test.astype('float32')
-    
+        
+        #x_train, _, x_test = standarize_image_01(x_train, tst=x_test)
         x_train, _, x_test = standarize_image_025(x_train, tst=x_test)
         x_train = x_train.reshape(x_train.shape[0], img_rows, img_cols, n_channels)
         x_test = x_test.reshape(x_test.shape[0], img_rows, img_cols, n_channels)
@@ -860,8 +899,11 @@ def test_comp(settings,random_sid=9):
     print (clip_dict)
     
     opt= SGDwithLR(lr_dict, mom_dict,decay_dict,clip_dict, 
-                   decay_epochs,clipvalue=0.01)#, decay=None)
-
+                   decay_epochs,clipvalue=1.0)#, decay=None)
+    #opt = AdamwithClip(clips=clip_dict)
+    #opt= SGDwithLR(lr_dict, mom_dict,decay_dict,clip_dict, 
+    #                decay_epochs,update_clip=UPDATE_Clip)#, decay=None)
+                   
     model.compile(loss=keras.losses.categorical_crossentropy,
                   optimizer=opt,
                   metrics=['accuracy'])
@@ -880,6 +922,7 @@ def test_comp(settings,random_sid=9):
         rv_weights_1 = RecordVariable("focus-1","Weights:0")
         rv_sigma_1 = RecordVariable("focus-1","Sigma:0")
         rv_mu_1 = RecordVariable("focus-1","Mu:0")
+        #out_call = RecordOutput(model,["focus-1", "focus-2"],stat_func_list, stat_func_name)
         print_lr_rates_callback = keras.callbacks.LambdaCallback(
                 on_epoch_end=lambda epoch, logs: print("iter: ", 
                                                        K.eval(model.optimizer.iterations),
@@ -1017,13 +1060,13 @@ if __name__ == "__main__":
     from shutil import copyfile
     print("Delayed start ",delayed_start)
     time.sleep(delayed_start)
-    #dset='mnist' 
+    dset='mnist' 
     #dset='cifar10'  # ~64,5 cifar is better with batch 256, init_sigma =0.01 
-    #dset='fashion'
+    #dset='mnist'
     #dset = 'mnist-clut'
-    dset='lfw_faces' # ~78,use batch_size = 32, augment=True, init_sigm=0.025, init_mu=spread
+    #dset='lfw_faces' # ~78,use batch_size = 32, augment=True, init_sigm=0.025, init_mu=spread
     sigma_reg_set = None
-    nhidden = (784,784)
+    nhidden = (700,800)
     #nhidden = (256,)
     #sigma_reg_set = [1e-10, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1]
 
@@ -1031,14 +1074,14 @@ if __name__ == "__main__":
     mod={'dset':dset, 'neuron':'focused', 'nhidden':nhidden, 'cnn_model':False,
          'nfilters':(32,32), 'kn_size':(5,5),
          'focus_init_sigma':0.025, 'focus_init_mu':'spread','focus_train_mu':True, 
-         'focus_train_si':True,'focus_train_weights':True,'focus_norm_type':2,
-         'focus_sigma_reg':sigma_reg_set,'augment':True, 
-         'Epochs':200, 'batch_size':32,'repeats':1,
+         'focus_train_si':True,'focus_train_weights':True,'focus_norm_type':0,
+         'focus_sigma_reg':sigma_reg_set,'augment':False, 
+         'Epochs':200, 'batch_size':256,'repeats':5,
          'lr_all':0.1}
     
     # lr_all 0.1 for MNIST
     # lr_all:0.01 for CIFAR-FACES-CLUT 
-    # FACES OVERWRITES THIS IN THE CODE. 
+    # FACES OVERWRITES THIS IN THE CODE. lr_all =0.001
     # ALSO I USE GRAD CLIP 0.01. IT IS OK IF YOU DO GRAD_CLIP 1.0
     
 
@@ -1060,6 +1103,7 @@ if __name__ == "__main__":
     # focused MNIST Augmented accuracy (200epochs): ~99.25-99.30
     # focused MNIST No Augment accuracy(200 epochs): ~99.25
     # Max sscores [0.9926999999046325, 0.9925999997138977, 0.9921999997138977, 0.9922999998092651, 0.9923999998092652]
+    # if you put 0.5 decay to all Max sscores [0.9928999998092651, 0.9923999997138977, 0.9920999997138977, 0.9923999998092652, 0.9923999996185303] 
     # res = repeated_trials(dset='cifar10',N=1,epochs=200, augment=False, mod=mod, test_function=f)
     # focused CIFAR-10 Augmented accuracy(200epochs): ~0.675
     # focused CIFAR-10 NONAugmented 63.5

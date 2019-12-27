@@ -74,6 +74,22 @@ def standarize_image_025(trn, val=None, tst=None):
     
     return trn, val, tst
 
+def standarize_image_01(trn, val=None, tst=None):
+
+    import numpy as np
+    M = 255.0
+    trn /= M
+    K = np.mean(trn, axis=0)
+    trn -= K
+    if val is not None:
+        val /= M
+        val -= K
+    if tst is not None:
+        tst /= M
+        tst -= K
+    
+    return trn, val, tst
+
 
 def dump_keras_structure(weight_file_path):
     """
@@ -192,6 +208,30 @@ class RecordWeights(Callback):
             #print("recording", p.name)
                 self.record.append(all_weights[i])
 
+class RecordOutput(Callback):
+    def __init__(self,model,names,stat_functions, stat_names):
+        self.output_layers = names
+        self.s_name = 'output_dump'
+        self.model = model
+        self.model.metrics_names += [self.s_name]
+        self.model.metrics_tensors += [layer.output for layer in model.layers if layer.name in self.output_layers]
+        self.stat_list = stat_functions
+        self.stat_names = stat_names
+      
+    def on_batch_begin(self, batch, logs=None):
+        self.on_batch_end(batch, logs)
+    def on_batch_end(self, batch, logs=None):
+        
+        print('log keys:', logs.keys())
+        
+        s_pred = logs[self.s_name]
+        print('s_pred:', s_pred.shape)
+        for i,p in enumerate(s_pred):
+            print(i,p)
+            stat_str = [n+str(s(p)) for s,n in zip(self.stat_list,self.stat_names)]
+            print("Stats for", p.name, stat_str)
+
+        return
 
 class RecordVariable(RecordWeights):
         #print("The name for Record Variable has changed, use RecordWeights or RecordTensor instead")
@@ -328,7 +368,7 @@ class SGDwithLR(Optimizer):
     """
     def __init__(self, lr={'all':0.1}, momentum={'all':0.0}, decay={},
                  clips={}, decay_epochs=None,
-                 nesterov=False, verbose=0, **kwargs):
+                 nesterov=False, verbose=0, update_clip=100.0, **kwargs):
         super(SGDwithLR, self).__init__(**kwargs)
         with K.name_scope(self.__class__.__name__):
             self.iterations = K.variable(0, dtype='int64', name='iterations')
@@ -355,6 +395,11 @@ class SGDwithLR(Optimizer):
                 self.decay_epochs=K.variable(decay_epochs, dtype='int64')
             else:
                 self.decay_epochs=[]
+            
+            #abs(new_p-old_p)/old_p < gc 
+            self.UPCLIP =update_clip ## update can not be larger than this. 
+            
+                
                     
         self.nesterov = nesterov
         self.verbose = verbose
@@ -425,7 +470,19 @@ class SGDwithLR(Optimizer):
                 new_p = p + momentum * (momentum * m - lr * g) - lr * g
             else:
                 new_p = p + momentum * m - lr * g
-                
+            
+            # CHANGE CLIP
+            _to_tensor = K.tensorflow_backend._to_tensor
+            _clip_by_val = K.tf.clip_by_value
+            margin = K.mean(K.abs(p*K.constant(self.UPCLIP)))
+            min_value = _to_tensor(p-margin, p.dtype.base_dtype)
+            max_value = _to_tensor(p+margin, p.dtype.base_dtype)
+            
+            max_v = K.maximum(min_value, max_value)
+            min_v = K.minimum(min_value, max_value)
+
+            new_p = _clip_by_val(new_p, min_v, max_v)
+             
             # Apply constraints.
             if getattr(p, 'constraint', None) is not None:
                 new_p = p.constraint(new_p)
