@@ -56,6 +56,18 @@ def eval_Kdict(d):
     l = [str(k)+':'+str(K.eval(v)) for k,v in d.items()]
     return l
 
+
+def set_pattern_find(name, keyset):
+    ''' this function searchs keyset patterns in name. 
+    if finds it, it returns that key. single match only'''
+    #print(name, keyset)
+    #print(name, keyset)
+    for k in keyset:
+        if name.find(k) >= 0:
+            print(name, keyset)
+            return k   
+    return None
+
 def standarize_image_025(trn, val=None, tst=None):
 
     K = 4.0 # 2.0 is very good with MNIST 99.20-99.19
@@ -211,7 +223,7 @@ class RecordWeights(Callback):
 class RecordOutput(Callback):
     def __init__(self,model,names,stat_functions, stat_names):
         self.output_layers = names
-        self.s_name = 'output_dump'
+        self.s_name = 's'
         self.model = model
         self.model.metrics_names += [self.s_name]
         self.model.metrics_tensors += [layer.output for layer in model.layers if layer.name in self.output_layers]
@@ -238,9 +250,9 @@ class RecordVariable(RecordWeights):
         pass
 
 class RecordTensor(Callback):
-    print("Not working!")
     pass
     def __init__(self,tensor, on_batch=True,  on_epoch=False):
+        print("Not working!")
         self.tensor = tensor
         self.on_batch = on_batch
         self.on_epoch = on_epoch
@@ -255,17 +267,19 @@ class RecordTensor(Callback):
 
 
 class PrintLayerVariableStats(Callback):
-    def __init__(self,name,var,stat_functions,stat_names):
+    def __init__(self,name,var,stat_functions,stat_names,not_trainable=False):
+        
         self.layername = name
         self.varname = var
         self.stat_list = stat_functions
         self.stat_names = stat_names
+        self.not_trainable = not_trainable
 
     def setVariableName(self,name, var):
         self.layername = name
         self.varname = var
     def on_train_begin(self, logs={}):
-        all_params = self.model.get_layer(self.layername)._trainable_weights
+        all_params = self.model.get_layer(self.layername).weights
         all_weights = self.model.get_layer(self.layername).get_weights()
 
         for i,p in enumerate(all_params):
@@ -278,7 +292,8 @@ class PrintLayerVariableStats(Callback):
         #    self.record.append(logs.get('loss'))
 
     def on_epoch_end(self, epoch, logs={}):
-        all_params = all_weights = self.model.get_layer(self.layername)._trainable_weights
+        all_params = self.model.get_layer(self.layername).weights
+        
         all_weights = self.model.get_layer(self.layername).get_weights()
             
         for i,p in enumerate(all_params):
@@ -289,8 +304,8 @@ class PrintLayerVariableStats(Callback):
 
 
 class RecordFunctionOutput(Callback):
-    print("Not working!")
     def __init__(self,funct, avg=False):
+        print("Not working!")
         self.funct = funct
         self.sess = K.get_session()
         self.avg=avg
@@ -355,9 +370,10 @@ from keras.legacy import interfaces
 class SGDwithLR(Optimizer):
     """Stochastic gradient descent optimizer with different LEARNING RATES
     CODED BY BTEK
-
+    Uses dictionaries for different parameters.
     Includes support for momentum,
     learning rate decay, and Nesterov momentum.
+    pattern_search_true allows dict keys to be patterns instead of exact match.
 
     # Arguments
         LR: a dictionary of floats for, float >= 0
@@ -365,10 +381,12 @@ class SGDwithLR(Optimizer):
             in the relevant direction and dampens oscillations.
         decay: float >= 0. Learning rate decay over each update.
         nesterov: boolean. Whether to apply Nesterov momentum.
+        
     """
     def __init__(self, lr={'all':0.1}, momentum={'all':0.0}, decay={},
                  clips={}, decay_epochs=None,
-                 nesterov=False, verbose=0, update_clip=100.0, **kwargs):
+                 nesterov=False, verbose=0, update_clip=100.0, 
+                 pattern_search=False,**kwargs):
         super(SGDwithLR, self).__init__(**kwargs)
         with K.name_scope(self.__class__.__name__):
             self.iterations = K.variable(0, dtype='int64', name='iterations')
@@ -391,6 +409,7 @@ class SGDwithLR(Optimizer):
             self.decay = kdict(decay,'dec_')
             self.clips = kdict(clips,'clips')
             self.clips_val = clips
+            self.pattern_search = pattern_search
             if decay_epochs is not None:
                 self.decay_epochs=K.variable(decay_epochs, dtype='int64')
             else:
@@ -419,7 +438,7 @@ class SGDwithLR(Optimizer):
             lr = K.switch(hit_decay_epoch, self.lr['all']*self.decay['all'],
                           self.lr['all'])
 
-            K.print_tensor(self.lr['all'])
+            #K.print_tensor(self.lr['all'])
             #a = K.switch(hit_decay_epoch, 
             #             K.print_tensor(self.lr['all'],message='Decays:'), 
             #             K.print_tensor(self.lr['all'],message=' '))
@@ -431,35 +450,39 @@ class SGDwithLR(Optimizer):
         moments = [K.zeros(s) for s in shapes]
         self.weights = [self.iterations] + moments
         #print(self.weights)
+        
 
         for p, g, m in zip(params, grads, moments):
             #print("HEREEEE:", p.name, g, m)
-            if p.name in self.lr.keys():
+            lrptrkey= set_pattern_find(p.name,self.lr.keys())
+            if lrptrkey:
                 if self.verbose>0:
-                    print("Setting different learning rate for ", p.name, " : ", K.eval(self.lr[p.name]))
-                lr = self.lr[p.name]
-                if self.decay_epochs and p.name in self.decay.keys():
-                    lr = K.switch(hit_decay_epoch, self.lr[p.name]*self.decay[p.name],
-                                  self.lr[p.name])
-                    self.updates.append(K.update(self.lr[p.name],lr))
+                    print("Setting different learning rate for ", p.name, " : ", K.eval(self.lr[lrptrkey]))
+                lr = self.lr[lrptrkey]
+                dcptrkey=set_pattern_find(p.name,self.decay.keys())
+                if self.decay_epochs and dcptrkey:
+                    lr = K.switch(hit_decay_epoch, self.lr[lrptrkey]*self.decay[dcptrkey],
+                                  self.lr[lrptrkey])
+                    self.updates.append(K.update(self.lr[lrptrkey],lr))
                     if self.verbose>0:
-                        print("Added decay to ", p.name, ": ", K.eval(lr),",",self.decay[p.name])
+                        print("Added decay to ", p.name, ": ", K.eval(lr),",",self.decay[dcptrkey])
                 elif self.decay_epochs:
-                    lr = K.switch(hit_decay_epoch, self.lr[p.name]*self.decay['all'],self.lr[p.name])
-                    self.updates.append(K.update(self.lr[p.name],lr))
+                    lr = K.switch(hit_decay_epoch, self.lr[lrptrkey]*self.decay['all'],self.lr[lrptrkey])
+                    self.updates.append(K.update(self.lr[lrptrkey],lr))
                     if self.verbose>0:
                         print("Added decay to ", p.name, ": ", K.eval(lr),",",self.decay['all'])
                 else:
-                    lr = self.lr[p.name]
+                    lr = self.lr[lrptrkey]
 
             else:
                 lr = self.lr['all']
-
-            if p.name in self.momentum.keys():
+            
+            momptrkey = set_pattern_find(p.name,self.momentum.keys())
+            if momptrkey:
                 if self.verbose>0:
                     print("Setting different momentum for ", p.name, " , ", 
-                          K.eval(self.momentum[p.name]))
-                momentum = self.momentum[p.name]
+                          K.eval(self.momentum[momptrkey]))
+                momentum = self.momentum[momptrkey]
             else:
                 momentum = self.momentum['all'] 
 
@@ -486,11 +509,11 @@ class SGDwithLR(Optimizer):
             # Apply constraints.
             if getattr(p, 'constraint', None) is not None:
                 new_p = p.constraint(new_p)
-            
-            if self.clips_val and (p.name in self.clips.keys()):
+            clptrkey = set_pattern_find(p.name,self.clips.keys())
+            if self.clips_val and clptrkey:
                 if self.verbose>0:
-                    print("Clipping variable",p.name," to ", self.clips[p.name])
-                c = K.eval(self.clips[p.name])
+                    print("Clipping variable",p.name," to ", self.clips[clptrkey])
+                c = K.eval(self.clips[clptrkey])
                 new_p = K.clip(new_p, c[0], c[1])
             #print("updates for ", p.name, " lr: ", K.eval(lr), " mom:", K.eval(momentum))
             self.updates.append(K.update(p, new_p))
@@ -505,6 +528,170 @@ class SGDwithLR(Optimizer):
         base_config = super(SGDwithLR, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
     
+
+class SGDwithCyclicLR(Optimizer):
+    """Stochastic gradient descent optimizer with different LEARNING RATES and 
+    CYCLING LEARNING RATE CHANGE. IT USES A GAUSSIAN PEAKING TO lr AT peaklriter iteratirons.
+    CODED BY BTEK
+    Uses dictionaries for different parameters.
+    Includes support for momentum,
+    learning rate decay, and Nesterov momentum.
+    pattern_search_true allows dict keys to be patterns instead of exact match.
+    "Cycling LR SGD OPTIMIZER: the learning starts from min_lr,",
+                  " raises to lr in peaklriter epochs than drops down to min_lr ",
+                  " in  peallriter iterations. Note that iterations are not epochs",
+                  " but batch iterations"
+
+    # Arguments
+        LR: a dictionary of floats for, float >= 0
+        momentum: float >= 0. Parameter that accelerates SGD
+            in the relevant direction and dampens oscillations.
+        decay: float >= 0. Learning rate decay over each update.
+        nesterov: boolean. Whether to apply Nesterov momentum.
+        
+    """
+    def __init__(self, peaklriter,lr={'all':0.01}, momentum={'all':0.0}, 
+                 min_lr={'all':0.0001}, peak_lr={'all':2.0}, lrsigma=0.5,
+                 clips={}, nesterov=False, verbose=0, update_clip=100.0, 
+                 pattern_search=True,**kwargs):
+        super(SGDwithCyclicLR, self).__init__(**kwargs)
+        with K.name_scope(self.__class__.__name__):
+            self.iterations = K.variable(0, dtype='int64', name='iterations')
+            print("Cycling LR SGD OPTIMIZER: the learning starts from min_lr,",
+                  " raises to lr in peaklriter epochs than drops down to min_lr ",
+                  " in  peallriter iterations. Note that iterations are not epochs",
+                  " but batch iterations")
+            if 'all' not in lr.keys():
+                print('adding LR for all elements')
+                lr.setdefault('all',2.0)
+            if isinstance(lr, (float,int)):  
+                print('This SGD works with dictionaries')
+                lr = {'all',lr}
+                #print(lr)
+            
+            if  isinstance(momentum, (float,int)):  
+                print('This SGD works with dictionaries')
+                momentum = {'all',momentum}
+                #print(lr)
+        
+            self.lr = kdict(lr,'lr_')
+            self.min_lr = kdict(min_lr,'min_lr')
+            self.peak_lr = kdict(peak_lr,'peak_lr')
+            
+            self.peaklriter = K.constant(peaklriter)
+            self.lrsigma = K.constant(lrsigma)
+            #print("LEARNING RATE: ", lr)
+            self.momentum = kdict(momentum,'mom_')
+            self.clips = kdict(clips,'clips')
+            self.clips_val = clips
+            self.pattern_search = pattern_search
+            #abs(new_p-old_p)/old_p < gc 
+            self.UPCLIP =update_clip ## update can not be larger than this. 
+            
+                
+                    
+        self.nesterov = nesterov
+        self.verbose = verbose
+
+    @interfaces.legacy_get_updates_support
+    def get_updates(self, loss, params):
+        grads = self.get_gradients(loss, params)
+
+        # first update the number of iterations
+        self.updates = [K.update_add(self.iterations, 1)]
+        
+        # Cycling Gaussian LR
+        # I implement this lr_f = lambda x,b,c,s: b+ s*np.exp(-(x-c)**2/(c*0.5)**2)
+        def gauss_lr(min_lr, max_lr, center, lrsigma,i):
+            
+            return (min_lr+ max_lr*K.exp(-(i-center)**2/(center*lrsigma)**2))
+        
+        ite_casted = K.cast(self.iterations, K.dtype(self.peaklriter))
+        all_lr = gauss_lr(self.min_lr['all'], self.peak_lr['all'],
+                              self.peaklriter,self.lrsigma,ite_casted)
+        #current_lr = self.min_lr['all'] + 
+        #self.peak_lr['all']*K.exp(((ite_casted-self.peaklriter)**2)/(self.dropsigma*self.peaklriter)**2)
+        ############################################################################
+        self.updates.append(K.update(self.lr['all'],all_lr))
+
+        shapes = [K.int_shape(p) for p in params]
+        moments = [K.zeros(s) for s in shapes]
+        self.weights = [self.iterations] + moments
+        #print(self.weights)
+        
+
+        for p, g, m in zip(params, grads, moments):
+            #print("HEREEEE:", p.name, g, m)
+            lrptrkey= set_pattern_find(p.name,self.lr.keys())
+            if lrptrkey:
+                if self.verbose>0:
+                    print("Setting different learning rate for ", p.name, " : ", K.eval(self.lr[lrptrkey]))
+                if set_pattern_find(p.name,self.min_lr.keys()) and set_pattern_find(p.name,self.peak_lr.keys()):
+                    p_lr = gauss_lr(self.min_lr[lrptrkey], self.peak_lr[lrptrkey],
+                                          self.peaklriter,self.lrsigma,ite_casted)
+                else:
+                    p_lr = gauss_lr(self.min_lr['all'], self.peak_lr['all'],
+                                          self.peaklriter,self.lrsigma,ite_casted)
+            else:
+                p_lr = self.lr['all']
+                
+            momptrkey = set_pattern_find(p.name,self.momentum.keys())
+            if momptrkey:
+                if self.verbose>0:
+                    print("Setting different momentum for ", p.name, " , ", 
+                          K.eval(self.momentum[momptrkey]))
+                momentum = self.momentum[momptrkey]
+            else:
+                momentum = self.momentum['all'] 
+
+            
+            
+
+            if self.nesterov:
+                updt = momentum * (momentum * m - p_lr * g) - p_lr * g
+            else:
+                updt = momentum * m - p_lr * g
+            
+            # CHANGE CLIP
+            _to_tensor = K.tensorflow_backend._to_tensor
+            _clip_by_val = K.tf.clip_by_value
+            margin = K.mean(K.abs(p))*K.constant(self.UPCLIP)
+            #margin = K.mean(K.abs(p*K.constant(self.UPCLIP)))
+            #min_value = _to_tensor(-margin, p.dtype.base_dtype)
+            #max_value = _to_tensor(margin, p.dtype.base_dtype)
+            
+            #max_v = K.maximum(min_value, max_value)
+            min_v = K.zeros_like(margin)
+            updt_sign = K.sign(updt)
+            updt_val = _clip_by_val(K.abs(updt), min_v, margin)
+            
+            v = updt_sign * updt_val  # velocity
+            new_p = p + v
+            
+            
+            self.updates.append(K.update(m, v))
+            # Apply constraints.
+            if getattr(p, 'constraint', None) is not None:
+                new_p = p.constraint(new_p)
+            clptrkey = set_pattern_find(p.name,self.clips.keys())
+            if self.clips_val and clptrkey:
+                c = K.eval(self.clips[clptrkey])
+                if self.verbose>0:
+                    print("Clipping variable",p.name," to ", c)
+                    #input()
+                new_p = K.clip(new_p, c[0], c[1])
+            #print("updates for ", p.name, " lr: ", K.eval(lr), " mom:", K.eval(momentum))
+            self.updates.append(K.update(p, new_p))
+        return self.updates
+
+    def get_config(self):
+        config = {'peaklriter':self.peaklriter,'dropsigma': self.dropsigma,
+                  'lr':self.lr, 'momentum':self.momenturm, 
+                 'min_lr':self.min_Lr, 'peak_lr':self.peak_lr,
+                 'clips':self.clips, 'nesterov': self.nesterov, 
+                 'update_clip':self.UPCLIP}
+        base_config = super(SGDwithLR, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
     
 
 class RMSpropwithClip(Optimizer):
@@ -566,11 +753,12 @@ class RMSpropwithClip(Optimizer):
             # Apply constraints.
             if getattr(p, 'constraint', None) is not None:
                 new_p = p.constraint(new_p)
-                
-            if p.name in self.clips.keys():
+            
+            clptrkey = set_pattern_find(p.name,self.clips.keys())
+            if self.clips_val and clptrkey:
                 if self.verbose>0:
                     print("CLpping variable",p.name," to ", self.clips[p.name] )
-                c = K.eval(self.clips[p.name])
+                c = K.eval(self.clips[clptrkey])
                 new_p = K.clip(new_p, c[0], c[1])
 
             self.updates.append(K.update(p, new_p))
@@ -665,8 +853,9 @@ class AdamwithClip(Optimizer):
             if getattr(p, 'constraint', None) is not None:
                 new_p = p.constraint(new_p)
                 
-            if p.name in self.clips.keys():
-                c = K.eval(self.clips[p.name])
+            clptrkey = set_pattern_find(p.name,self.clips.keys())
+            if self.clips_val and clptrkey:            
+                c = K.eval(self.clips[clptrkey])
                 if self.verbose>0:
                     print("Clipping variable",p.name," to ", c )
                 new_p = K.clip(new_p, c[0], c[1])

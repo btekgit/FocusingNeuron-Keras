@@ -125,7 +125,9 @@ class FocusedLayer1D(Layer):
         self.MIN_SI = np.float32(MIN_SI)#, dtype='float32')
         self.MAX_SI = np.float32(MAX_SI)#, dtype='float32')
         
-        w_init = initializers.get(self.kernel_initializer) if self.kernel_initializer else self.weight_initializer_delta_ortho
+        w_init = initializers.get(self.kernel_initializer) if self.kernel_initializer else self.weight_initializer_fw_bg
+        #w_init = initializers.get(self.kernel_initializer) if self.kernel_initializer else self.weight_initializer_delta_ortho
+        #w_init = initializers.get(self.kernel_initializer) if self.kernel_initializer else self.weight_initializer_sr_sc
         
         self.W = self.add_weight(shape=(self.input_dim, self.units),
                                       initializer=w_init,
@@ -277,6 +279,62 @@ class FocusedLayer1D(Layer):
                 
         return W
     
+    def weight_initializer_sr_sc(self,shape, dtype='float32'):
+        '''
+        Initializes weights for focusing neuron. The main idea is that
+        gaussian focus effects the input variance. The weights must be
+        initialized by considering focus coefficients norm"
+        '''
+        # the paper results were taken with this. 
+        initer = 'Glorot'
+        distribution = 'uniform'
+        
+        kernel = K.eval(self.calc_U())
+        
+        W = np.zeros(shape=shape, dtype=dtype)
+        # for Each Gaussian initialize a new set of weights
+        verbose=self.verbose
+        if verbose:
+            print("Kernel max, mean, min: ", np.max(kernel), np.mean(kernel), np.min(kernel))
+            print("kernel shape:", kernel.shape, ", W shape: ",W.shape)
+        
+        #fan_out = self.units
+        sum_over_domain = np.sum(kernel**2,axis=1) # r base
+        sum_over_neuron = np.sum(kernel**2,axis=0)
+        print("fan Out fan in", sum_over_domain, sum_over_neuron)
+        fan_out = np.median(sum_over_domain)
+        fan_in = np.median(sum_over_neuron)
+        print("fan Out fan in", fan_out, fan_in)
+                
+        for c in range(W.shape[1]):
+            for r in range(W.shape[0]):
+                
+                #fan_in *= self.input_channels no need for this in repeated U. 
+                if initer == 'He':
+                    std = self.gain * 2.0 / sqrt32(fan_in)
+                else:
+                    #std = self.gain * sqrt32(1.0) / sqrt32(W.shape[1])
+                    std = self.gain *  2.0 / sqrt32(fan_in+fan_out)
+                
+                std = np.float32(std)
+                if c == 0 and verbose:
+                    print("Std here: ",std, type(std),W.shape[0],
+                          " fan_in", fan_in, "mx U", np.max(kernel[:,:,:,c]))
+                    print(r,",",c," Fan in ", fan_in, " Fan_out:", fan_out, W[r,c])
+                    
+                if distribution == 'uniform':
+                    std = std * sqrt32(3.0)
+                    std = np.float32(std)
+                    w_vec = np.random.uniform(low=-std, high=std, size=1)
+                elif distribution == 'normal':
+                    std = std/ np.float32(.87962566103423978)           
+                    w_vec = np.random.normal(scale=std, size=1)
+                    
+                W[r,c] = w_vec.astype('float32')
+              
+        return W
+    
+    
     def weight_initializer_dif_var(self,shape, dtype='float32'):
         # this does not work better
         initer = 'He'
@@ -343,8 +401,13 @@ class FocusedLayer1D(Layer):
                                    self.units)
         mu =np.int32(mu*W.shape[0])
         print(mu)
+        std = sqrt32(2.0)
         for n in range(W.shape[1]):
-            W[mu[n], n] = 1.0/sqrt32(W.shape[0])/kernel[mu[n],n]
+            #W[mu[n], n] =  np.random.choice([-std,std], size=1) #np.random.uniform(low=-std, high=std, size=1)#/W.shape[0])/kernel[mu[n],n]
+            #W[mu[n], n] =  std*0.25 # 
+            #W[mu[n], n] =  std*1.0/W.shape[0] # 
+            W[mu[n], n] = std
+                            
             
         #print(W[:,0])
         #print(W[:,1])
@@ -371,7 +434,7 @@ class FocusedLayer1D(Layer):
         #scaler = (np.pi*self.cov_scaler**2) * (self.idxs.shape[0])
         #print("down shape :",dwn.shape)
         result = K.exp(-up / dwn)
-        kernel= K.eval(result)
+        #kernel= K.eval(result)
         
         if self.normed==1:
             result /= K.sqrt(K.sum(K.square(result), axis=-1,keepdims=True))
@@ -414,6 +477,7 @@ def mu_si_initializer(initMu, initSi, num_incoming, num_units, verbose=True):
             #paper results were taken with np.linspace(0.2, 0.8, num_units)  . 
             # THIS AFFECTS RESULTS!!!
             mu = np.linspace(0.2, 0.8, num_units)  
+            #mu = np.linspace(0.0, 1.0, num_units)  
             #mu = np.linspace(0.1, 0.9, num_units)
         elif initMu == 'spread2d':
             # I create 2D grid equally distributed to cover most of the image
@@ -450,8 +514,11 @@ def mu_si_initializer(initMu, initSi, num_incoming, num_units, verbose=True):
     if isinstance(initSi,str):
         if initSi == 'random':
             si = np.random.uniform(low=0.05, high=0.25, size=num_units)
-        elif initSi == 'spread':
-            si = np.repeat((initSi / num_units), num_units)
+        elif initSi == 'normal':
+            si = np.random.uniform(low=0.05, high=0.25, size=num_units)
+            #si = np.repeat((initSi / num_units), num_units)
+            pass
+            print("not implemented")
 
     elif isinstance(initSi,float):  #initialize it with the given scalar
         si = np.repeat(initSi, num_units)# 
@@ -872,16 +939,23 @@ def test_comp(settings,random_sid=9):
         x_train, _, x_test = standarize_image_025(x_train, tst=x_test)
         x_train = x_train.reshape(x_train.shape[0], img_rows, img_cols, n_channels)
         x_test = x_test.reshape(x_test.shape[0], img_rows, img_cols, n_channels)
-        
-    input_shape = (img_rows, img_cols, n_channels)
+    
+    input_shape = (img_rows, img_cols, n_channels)    
+    # convert class vectors to binary class matrices
+    y_train = keras.utils.to_categorical(y_train, num_classes)
+    y_test = keras.utils.to_categorical(y_test, num_classes)
+
+    from keras_data import load_dataset
+    dset = settings['dset']
+    ld_data = load_dataset(dset,normalize_data=True,options=[])
+    x_train,y_train,x_test,y_test,input_shape,num_classes=ld_data
+    #print(num_classes)
+    
     
     print('x_train shape:', x_train.shape)
     print(x_train.shape[0], 'train samples')
     print(x_test.shape[0], 'test samples')
     
-    # convert class vectors to binary class matrices
-    y_train = keras.utils.to_categorical(y_train, num_classes)
-    y_test = keras.utils.to_categorical(y_test, num_classes)
     sigma_reg = settings['focus_sigma_reg']
     sigma_reg = keras.regularizers.l2(sigma_reg) if sigma_reg is not None else sigma_reg
     settings['focus_sigma_reg'] = sigma_reg
@@ -1051,8 +1125,9 @@ def repeated_trials(test_function=None, settings={}):
     
 if __name__ == "__main__":
     import os
-    os.environ['CUDA_VISIBLE_DEVICES']="0"
-    os.environ['TF_FORCE_GPU_ALLOW_GROWTH']="true"
+    if 'CUDA_VISIBLE_DEVICES' not in os.environ.keys():
+        os.environ['CUDA_VISIBLE_DEVICES']="1"
+        os.environ['TF_FORCE_GPU_ALLOW_GROWTH']="true"
     print("Run as main")
     #test()
     delayed_start = 0*3600
@@ -1060,13 +1135,14 @@ if __name__ == "__main__":
     from shutil import copyfile
     print("Delayed start ",delayed_start)
     time.sleep(delayed_start)
-    dset='mnist' 
+    #dset='mnist' 
     #dset='cifar10'  # ~64,5 cifar is better with batch 256, init_sigma =0.01 
-    #dset='mnist'
+    dset='mnist'
     #dset = 'mnist-clut'
+    #dset = 'fashion'
     #dset='lfw_faces' # ~78,use batch_size = 32, augment=True, init_sigm=0.025, init_mu=spread
     sigma_reg_set = None
-    nhidden = (700,800)
+    nhidden = (800,800)
     #nhidden = (256,)
     #sigma_reg_set = [1e-10, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1]
 
@@ -1074,9 +1150,9 @@ if __name__ == "__main__":
     mod={'dset':dset, 'neuron':'focused', 'nhidden':nhidden, 'cnn_model':False,
          'nfilters':(32,32), 'kn_size':(5,5),
          'focus_init_sigma':0.025, 'focus_init_mu':'spread','focus_train_mu':True, 
-         'focus_train_si':True,'focus_train_weights':True,'focus_norm_type':0,
+         'focus_train_si':True,'focus_train_weights':True,'focus_norm_type':2,
          'focus_sigma_reg':sigma_reg_set,'augment':False, 
-         'Epochs':200, 'batch_size':256,'repeats':5,
+         'Epochs':200, 'batch_size':512,'repeats':5,
          'lr_all':0.1}
     
     # lr_all 0.1 for MNIST
