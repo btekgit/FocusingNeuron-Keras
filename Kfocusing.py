@@ -47,6 +47,7 @@ class FocusedLayer1D(Layer):
                  reg_bias=None,
                  normed=2,
                  verbose=False,
+                 perrow=False,
                  **kwargs):
         if 'input_shape' not in kwargs and 'input_dim' in kwargs:
             kwargs['input_shape'] = (kwargs.pop('input_dim'),)
@@ -73,6 +74,7 @@ class FocusedLayer1D(Layer):
         self.normed = normed
         self.verbose = verbose
         self.sigma=None
+        self.perrow=perrow # by this setting every row gets one neuron. 
         
             
         if 'input_shape' not in kwargs and 'input_dim' in kwargs:
@@ -154,7 +156,11 @@ class FocusedLayer1D(Layer):
         if self.verbose:
             print("weights shape", self.W.shape)
         self.kernel = self.W*u
-        output = K.dot(inputs, self.kernel)
+        
+        if not self.perrow:
+            output = K.dot(inputs, self.kernel)   # XW
+        else:
+            output = K.sum(inputs * self.kernel, axis=-1)   # Sum(X.*W)over rows.
         if self.use_bias:
             output = K.bias_add(output, self.bias, data_format='channels_last')
         if self.activation is not None:
@@ -401,7 +407,7 @@ class FocusedLayer1D(Layer):
                                    self.units)
         mu =np.int32(mu*W.shape[0])
         print(mu)
-        std = sqrt32(2.0)
+        std = sqrt32(1.0)
         for n in range(W.shape[1]):
             #W[mu[n], n] =  np.random.choice([-std,std], size=1) #np.random.uniform(low=-std, high=std, size=1)#/W.shape[0])/kernel[mu[n],n]
             #W[mu[n], n] =  std*0.25 # 
@@ -1126,7 +1132,7 @@ def repeated_trials(test_function=None, settings={}):
 if __name__ == "__main__":
     import os
     if 'CUDA_VISIBLE_DEVICES' not in os.environ.keys():
-        os.environ['CUDA_VISIBLE_DEVICES']="1"
+        os.environ['CUDA_VISIBLE_DEVICES']="0"
         os.environ['TF_FORCE_GPU_ALLOW_GROWTH']="true"
     print("Run as main")
     #test()
