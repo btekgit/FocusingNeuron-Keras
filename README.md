@@ -28,3 +28,12 @@ I have added keras implementations and some new ipynb for experiments:
 
     NOTE Experiments notebooks can be run in GOOGLE colab
 
+## UPDATE APRIL 2020
+    I have added tensorflow 2. folder which includes tf2.keras codes. 
+    This version is working but optimizers are not 100%. I can't set
+    separate learning rates for MU and Sigma. 
+
+    In addition, I have weight-share option. The neurons can share their
+    weights now. sharedWeights parameter in FocusedLayer1D now controls
+    number of distinct weight sets (if it is 0, nweights=num_inputs x num_units)
+ 
