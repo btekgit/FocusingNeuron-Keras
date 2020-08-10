@@ -141,7 +141,8 @@ class FocusedLayer1D(Layer):
         self.MIN_SI = np.float32(MIN_SI)#, dtype='float32')
         self.MAX_SI = np.float32(MAX_SI)#, dtype='float32')
         
-        w_init = initializers.get(self.kernel_initializer) if self.kernel_initializer else self.weight_initializer_fw_bg
+        w_init = initializers.glorot_uniform()
+        #w_init = initializers.get(self.kernel_initializer) if self.kernel_initializer else self.weight_initializer_fw_bg
         #w_init = initializers.get(self.kernel_initializer) if self.kernel_initializer else self.weight_initializer_delta_ortho
         #w_init = initializers.get(self.kernel_initializer) if self.kernel_initializer else self.weight_initializer_sr_sc
         w_shape = (self.input_dim, self.units)
@@ -318,6 +319,7 @@ class FocusedLayer1D(Layer):
         distribution = 'uniform'
         
         kernel = K.eval(self.calc_U())
+        dtype = dtype.as_numpy_dtype()
         
         W = np.zeros(shape=shape, dtype=dtype)
         # for Each Gaussian initialize a new set of weights
@@ -369,6 +371,7 @@ class FocusedLayer1D(Layer):
         distribution = 'uniform'
         
         kernel = K.eval(self.calc_U())
+        dtype = dtype.as_numpy_dtype()
         
         W = np.zeros(shape=shape, dtype=dtype)
         # for Each Gaussian initialize a new set of weights
@@ -417,6 +420,7 @@ class FocusedLayer1D(Layer):
         distribution = 'uniform'
         
         kernel = K.eval(self.calc_U())
+        dtype = dtype.as_numpy_dtype()
         
         W = np.zeros(shape=shape, dtype=dtype)
         # for Each Gaussian initialize a new set of weights
@@ -434,7 +438,11 @@ class FocusedLayer1D(Layer):
             #W[mu[n], n] =  np.random.choice([-std,std], size=1) #np.random.uniform(low=-std, high=std, size=1)#/W.shape[0])/kernel[mu[n],n]
             #W[mu[n], n] =  std*0.25 # 
             #W[mu[n], n] =  std*1.0/W.shape[0] # 
-            W[mu[n], n] = std
+            t = 1.0/kernel.shape[1] # was np.prod(shape)
+            print("----->>>>>>>T is here:", t)
+            
+        
+            W[mu[n], n] = np.random.choice([-t,t])
                             
             
         #print(W[:,0])
@@ -472,7 +480,10 @@ class FocusedLayer1D(Layer):
             result *= K.sqrt(K.constant(self.input_dim))
         
         elif self.normed==3:
-            result += 0.1 # adding a bias
+            #result += 0.1 # adding a bias
+            print(result.shape)
+            result/= tf.expand_dims(tf.sqrt(1.0-tf.exp(-sigma)),axis=1)
+
 
             if verbose:
                 kernel= K.eval(result)
@@ -962,8 +973,8 @@ def test_comp(settings,random_sid=9):
         x_train = x_train.astype('float32')
         x_test = x_test.astype('float32')
         
-        #x_train, _, x_test = standarize_image_01(x_train, tst=x_test)
-        x_train, _, x_test = standarize_image_025(x_train, tst=x_test)
+        x_train, _, x_test = standarize_image_01(x_train, tst=x_test)
+        #x_train, _, x_test = standarize_image_025(x_train, tst=x_test)
         x_train = x_train.reshape(x_train.shape[0], img_rows, img_cols, n_channels)
         x_test = x_test.reshape(x_test.shape[0], img_rows, img_cols, n_channels)
     
@@ -1000,8 +1011,8 @@ def test_comp(settings,random_sid=9):
     #opt= SGDwithLR(lr_dict, mom_dict,decay_dict,clip_dict, 
     #                decay_epochs,update_clip=UPDATE_Clip)#, decay=None)
     
-    opt = tf.keras.optimizers.SGD(lr=0.05, momentum=0.9, clipvalue=1.0)
-    #opt = tf.keras.optimizers.Adam(lr=1e-3, clipvalue=1.0)
+    opt = tf.keras.optimizers.SGD(lr=0.1, momentum=0.9, clipvalue=1.0)
+    #opt = tf.keras.optimizers.Adam(lr=1e-1, clipvalue=1.0)
                    
     model.compile(loss=tf.keras.losses.categorical_crossentropy,
                   optimizer=opt,
@@ -1015,10 +1026,19 @@ def test_comp(settings,random_sid=9):
     #callbacks = [tb]
     callbacks = []
     
+    def fix_lr(epoch, lr, decay_epoch=(100,150), decay=0.9):
+        if epoch in decay_epoch: 
+            return lr*decay
+        return lr
+            
     
-    red_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.9, patience=10, verbose=1, mode='auto', min_delta=0.0001, cooldown=10, min_lr=1e-5)
-    
+    def gauss_lr(epoch, lr, min_lr=1e-3, max_lr=5e-1, center=60, lrsigma=0.2):
+            
+        return (min_lr+ max_lr*np.exp(-(epoch-center)**2/(center*lrsigma)**2))
+    #red_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=10, verbose=1, mode='auto', min_delta=0.0001, cooldown=10, min_lr=1e-5)
+    red_lr = tf.keras.callbacks.LearningRateScheduler(fix_lr,verbose=1)
     callbacks+=[red_lr]
+    #callbacks+=[fix_lr]
     
     if  settings['neuron']=='focused':
         ccp1 = ClipCallback('Sigma',[MIN_SIG,MAX_SIG])
@@ -1101,6 +1121,7 @@ def test_comp(settings,random_sid=9):
                             callbacks=callbacks, 
                             steps_per_epoch=x_train.shape[0]//batch_size)
     
+    
     score = model.evaluate(x_test, y_test, verbose=0)
     print('Test loss:', score[0])
     print('Test accuracy:', score[1])
@@ -1125,7 +1146,7 @@ def repeated_trials(test_function=None, settings={}):
     now = datetime.now()
     timestr = now.strftime("%Y%m%d-%H%M%S")
     
-    filename = 'outputs/Kfocusing/'+settings['dset']+'/'+timestr+'_'+settings['neuron']+'.model_results.npz'
+    filename = 'outputs/'+settings['dset']+'/'+timestr+'_'+settings['neuron']+'.model_results.npz'
     #copyfile("Kfocusingtf2.py",filename+"code.py")
    
     for s in range(len(sigmas)): # sigmas loop, should be safe if it is empty
@@ -1144,11 +1165,17 @@ def repeated_trials(test_function=None, settings={}):
                 list_sigmas.append([sigma_reg, np.mean(cb[4].record[-1])])
             
     print("Final scores", list_scores)
-    mx_scores = [np.max(list_histories[i].history['val_acc']) for i in range(len(list_histories))]
+    print("History KEYS:",list_histories[i].history.keys())
+    mx_scores = [np.max(list_histories[i].history['val_accuracy']) for i in range(len(list_histories))]
+    
     histories = [m.history.history for m in models]
     print("Max sscores", mx_scores)
-    np.savez_compressed(filename,mx_scores =mx_scores, list_scores=list_scores, 
+    
+    try:
+        np.savez_compressed(filename,mx_scores =mx_scores, list_scores=list_scores, 
                         modelz=histories, sigmas=list_sigmas)
+    except:
+        print("I could not save into",filename) 
     return mx_scores, list_scores, histories, list_sigmas
 
 
@@ -1166,11 +1193,11 @@ if __name__ == "__main__":
     from shutil import copyfile
     print("Delayed start ",delayed_start)
     time.sleep(delayed_start)
-    #dset='mnist' 
+    dset='mnist' 
     #dset='cifar10'  # ~64,5 cifar is better with batch 256, init_sigma =0.01 
-    dset='mnist'
+    #dset='mnist'
     #dset = 'mnist-clut'
-    #dset = 'fashion'
+    dset = 'fashion'
     #dset='lfw_faces' # ~78,use batch_size = 32, augment=True, init_sigm=0.025, init_mu=spread
     sigma_reg_set = None
     nhidden = (800,800)
@@ -1181,9 +1208,9 @@ if __name__ == "__main__":
     mod={'dset':dset, 'neuron':'focused', 'nhidden':nhidden, 'cnn_model':False,
          'nfilters':(32,32), 'kn_size':(5,5),
          'focus_init_sigma':0.025, 'focus_init_mu':'spread','focus_train_mu':True, 
-         'focus_train_si':True,'focus_train_weights':True,'focus_norm_type':2,
+         'focus_train_si':True,'focus_train_weights':True,'focus_norm_type':3,
          'focus_sigma_reg':sigma_reg_set,'augment':False, 
-         'Epochs':200, 'batch_size':512,'repeats':5,
+         'Epochs':200, 'batch_size':256,'repeats':5,
          'lr_all':0.1}
     
     # lr_all 0.1 for MNIST
@@ -1195,8 +1222,12 @@ if __name__ == "__main__":
     
     f = test_comp
     res = repeated_trials(test_function=f,settings=mod)
-    
-    np.savez_compressed('outputs/Kfocusing/'+'_'+mod['dset']+'_'+'cnn'+str(mod['cnn_model'])+'_regularization.npz', res)
+    try:
+        fname ='outputs/'+'_'+mod['dset']+'_'+'cnn'+str(mod['cnn_model'])+'_regularization.npz'
+        np.savez_compressed(fname, res)
+    except:
+        print("I could not save into",fname)
+        
     import matplotlib.pyplot as plt
     if sigma_reg_set:
         

@@ -81,11 +81,11 @@ def standarize_image_025(trn, val=None, tst=None):
     if val is not None:
         val /= M
         val *= K
-        val -= K/2
+        val -= K/2.0
     if tst is not None:
         tst /= M
         tst *= K
-        tst -= K/2
+        tst -= K/2.0
     
     return trn, val, tst
 
@@ -104,6 +104,7 @@ def standarize_image_01(trn, val=None, tst=None):
         tst -= K
     
     return trn, val, tst
+
 
 
 def dump_keras_structure(weight_file_path):
@@ -453,7 +454,9 @@ class SGDwithLR(Optimizer):
             else:
                 new_p = p + momentum * m - lr * g
             
-            # CHANGE CLIP
+            # CHANGE CLIP removing to test lfw-faces 
+            # this is an idea to limit the change in a variable by certain
+            #percentage of the original value
             _to_tensor = K.tensorflow_backend._to_tensor
             _clip_by_val = K.tf.clip_by_value
             margin = K.mean(K.abs(p*K.constant(self.UPCLIP)))

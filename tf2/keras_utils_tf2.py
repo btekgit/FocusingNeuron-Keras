@@ -343,7 +343,30 @@ class ClipCallback(Callback):
                 #K.set_value(p,K.clip(p,self.clips[0],self.clips[1]))
                 #print("Clipped", p.name)
         
+class NormCallback(Callback):
+    def __init__(self, varname, norm=1.0, naxis=[0,1,2]):
+        self.varname = varname
+        self.clips = clips
+        self.norm = norm
+        self.naxis = naxis
+        #self.model = model
         
+    def on_batch_end(self, batch, logs={}):
+        all_weights = self.model.trainable_weights
+            
+        for i,p in enumerate(all_weights):
+            #print(p.name)
+            if (p.name.find(self.varname)>=0):
+                # tf2 
+                pval = p.numpy()
+                pnormed = pval/ K.sqrt(K.sum(K.square(pval), axis=self.naxis,keepdims=True))
+                pnormed *= K.sqrt(K.constant(self.norm))
+                p.assign(pnormed)    
+                
+                # tf1.4 
+                #pnormed = pval/ K.sqrt(K.sum(K.square(pval), axis=self.naxis,keepdims=True))
+                #pnormed *= K.sqrt(K.constant(self.norm))
+                #K.update(self.W, Wnormed)
 
 from tensorflow.keras.optimizers import Optimizer
 #from tensorflow.keras.optimizers import interfaces
