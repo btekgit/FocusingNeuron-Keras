@@ -4,11 +4,8 @@ Keras TF implementation of Adaptive Locally Connected Neuron: FocusingNeuron
 Repo for focusing neuron (adaptive locally connected neuron)
 
 Paper: https://arxiv.org/abs/1809.09533 Notes:
-
-    Paper is an older version with slightly different focus function normalization.
-    Current code can provide even better results.
     
-## UPDATE AUG 2019:
+## UPDATE AUG 2019
 
 I have added keras implementations and some new ipynb for experiments:
 
