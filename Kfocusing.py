@@ -1180,20 +1180,18 @@ if __name__ == "__main__":
     #dset='lfw_faces' # simple network  ~max 77, lr 0.01, dec=0.9 (si0.5), use batch_size = 32, augment=True, init_sigm=0.025, init_mu=spread july 2020 confirmed
     #dset = 'lfw_faces' 
     sigma_reg_set = None
-    #nhidden = (256,)
-    #sigma_reg_set = [1e-10, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1]
     
     # I replaced direct lr_all with lr_mul. which is multiplier. aug 2020
     # For plain network: lr_mul 1.0 MNIST, CIFAR, fashion, mnist clut. faces overwrite all learning rates =0.01
     # For cnn: lr_mul 1.0 for nhidden 256, batch512 nfilters 32,32 MNIST, gets ~99.63
     # I also use GRAD_CLIP 1.0 in code
-    kwargs = {'dset':'fashion', 'neuron':'focused', 'nhidden':(256,), 
-              'cnn_model':True, 'nfilters':(32,32), 'repeats':5, 'epochs':200,
-              'batch_size':512,'lr_mul':0.1, 'augment':False, 'delay':0,
+    kwargs = {'dset':'mnist', 'neuron':'focused', 'nhidden':(784,784), 
+              'cnn_model':False, 'nfilters':(32,32), 'repeats':5, 'epochs':200,
+              'batch_size':512,'lr_mul':1.0, 'augment':False, 'delay':0,
               'kn_size':(5,5), 'focus_init_sigma':0.025,
               'focus_init_mu':'spread', 'focus_train_mu':True, 'focus_train_si':True,
               'focus_train_weights':True, 'focus_norm_type':2, 
-              'focus_sigma_reg':None, 'ex_name':''}
+              'focus_sigma_reg':[1e-10], 'ex_name':''}
     
     for s in sys.argv:
         print(":",s)
@@ -1308,6 +1306,7 @@ if __name__ == "__main__":
         
     else:
         plt.plot(np.reshape(res[0],(-1,kwargs['repeats'])),'o')
+    
     # USE SCRIPTS FOR PARAMS. 
     # run_mnist....
     # run_fashion_cnn_focus.sh
@@ -1328,4 +1327,11 @@ if __name__ == "__main__":
     # [0.9367000004768372, 0.939300000667572, 0.9373000004768371, 0.9375000004768371, 0.9370000005722046]
     
     
-    
+    # produce MNIST 99.27
+    #kwargs = {'dset':'mnist', 'neuron':'focused', 'nhidden':(784,784), 
+    #          'cnn_model':False, 'nfilters':(32,32), 'repeats':5, 'epochs':200,
+    #          'batch_size':512,'lr_mul':1.0, 'augment':False, 'delay':0,
+    #          'kn_size':(5,5), 'focus_init_sigma':0.025,
+    #          'focus_init_mu':'spread', 'focus_train_mu':True, 'focus_train_si':True,
+    #          'focus_train_weights':True, 'focus_norm_type':2, 
+    #          'focus_sigma_reg':[1e-10], 'ex_name':''}
