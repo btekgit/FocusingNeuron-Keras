@@ -17,7 +17,7 @@ import math
 ISize = 200
 Wsize = 2
 neurons = 16
-wdist = 'delta'
+wdist = 'uniform'
 
 #W = tf.random.uniform((Wsize,1),-1.0,1.0,name='W')
 idx = tf.linspace(0.0,1.0,ISize, name='idx')
@@ -99,7 +99,9 @@ plt.plot(np.var(UWfilt.numpy(),axis=0))
 plt.figure(235)
 plt.plot(sis,varlistUW)
 plt.plot(sis,varlistW)
-plt.legend(['var[UW]','var[W]'])
+plt.legend([r'var[$\Phi$ W]',r'var[W]'])
+plt.xlabel(r'$\sigma$')
+plt.ylabel('Average variance')
 
 
 #plt.plot(sis,1-np.exp(-sis))

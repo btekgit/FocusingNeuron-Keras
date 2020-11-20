@@ -947,6 +947,8 @@ def test_comp(settings,random_sid=9):
         
         e_i = x_train.shape[0] // batch_size
         decay_epochs =np.array([e_i*50,e_i*100, e_i*150], dtype='int64')
+        print("decay batch iterations: ",decay_epochs)
+
         #decay_epochs =np.array([e_i*100], dtype='int64')
 
     

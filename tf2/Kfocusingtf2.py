@@ -1011,7 +1011,7 @@ def test_comp(settings,random_sid=9):
     #opt= SGDwithLR(lr_dict, mom_dict,decay_dict,clip_dict, 
     #                decay_epochs,update_clip=UPDATE_Clip)#, decay=None)
     
-    opt = tf.keras.optimizers.SGD(lr=0.1, momentum=0.9, clipvalue=1.0)
+    opt = tf.keras.optimizers.SGD(lr=settings['lr_all'], momentum=0.9, clipvalue=1.0)
     #opt = tf.keras.optimizers.Adam(lr=1e-1, clipvalue=1.0)
                    
     model.compile(loss=tf.keras.losses.categorical_crossentropy,
@@ -1195,9 +1195,9 @@ if __name__ == "__main__":
     time.sleep(delayed_start)
     dset='mnist' 
     #dset='cifar10'  # ~64,5 cifar is better with batch 256, init_sigma =0.01 
-    #dset='mnist'
+    dset='mnist'
     #dset = 'mnist-clut'
-    dset = 'fashion'
+    #dset = 'fashion'
     #dset='lfw_faces' # ~78,use batch_size = 32, augment=True, init_sigm=0.025, init_mu=spread
     sigma_reg_set = None
     nhidden = (800,800)
@@ -1208,9 +1208,9 @@ if __name__ == "__main__":
     mod={'dset':dset, 'neuron':'focused', 'nhidden':nhidden, 'cnn_model':False,
          'nfilters':(32,32), 'kn_size':(5,5),
          'focus_init_sigma':0.025, 'focus_init_mu':'spread','focus_train_mu':True, 
-         'focus_train_si':True,'focus_train_weights':True,'focus_norm_type':3,
+         'focus_train_si':True,'focus_train_weights':True,'focus_norm_type':2,
          'focus_sigma_reg':sigma_reg_set,'augment':False, 
-         'Epochs':200, 'batch_size':256,'repeats':5,
+         'Epochs':200, 'batch_size':512,'repeats':5,
          'lr_all':0.1}
     
     # lr_all 0.1 for MNIST
